@@ -1,9 +1,13 @@
 import os
 import pandas as pd
+import hashlib
 
 # List Directory
 list_of_contents = os.listdir()
 dir_list = []
+
+def formatUsername(x):
+    return hashlib.sha256(str(x).encode('utf-8')).hexdigest()
 
 # Create list of subdirectories that contain yearly stats
 for item in list_of_contents:
@@ -58,5 +62,56 @@ for year_files in dir_list:
 
             # close register
             register_file.close()
-        # Once all registers added to Grade Report - save
-        gradesExport.to_excel(year_files+'\\GradeReport.xlsx')
+
+    # Once all registers added to Grade Report - Calculate attendance, calculate e.attendance, practical attendance, lecture attendance
+    # Get number of columns and reduce by three
+    col_list = list(gradesExport)
+    col_list.remove('USERNAME')
+    col_list.remove('GRADE')
+    col_list.remove('SYMBOL')
+
+    prac_a_list = []
+    prac_b_list = []
+    lec_list = []
+
+    # Create column name list for Practicals Group A and B + Lecture Group
+    for item in col_list:
+        if "Practical1" in item or "Group A" in item:
+            prac_a_list.append(item)
+        elif "Practical2" in item or "Group B" in item:
+            prac_b_list.append(item)
+        else:
+            lec_list.append(item)
+
+    if len(prac_a_list) != len(prac_b_list):
+        print("Different number of A and B practicals")
+ 
+    # Create attendance percentage
+    gradesExport['ATTENDANCE PERCENT'] = round((gradesExport[col_list].sum(axis=1) / len(col_list)) * 100.0, 0)
+    # Expected Attendance Percentage
+    gradesExport['ATTENDANCE EXPECTED PERCENT'] = round((gradesExport[col_list].sum(axis=1) / (len(prac_a_list) + len(lec_list))) * 100.0, 0)
+    # Practical Percentage
+    gradesExport['PRACTICAL PERCENT'] = round((gradesExport[prac_a_list+prac_b_list].sum(axis=1) / len(prac_a_list)) * 100.0, 0)
+    # Lecture Percent
+    gradesExport['LECTURE PERCENT'] = round((gradesExport[lec_list].sum(axis=1) / len(lec_list)) * 100.0, 0)
+
+    # Add MLS use number
+    if os.path.exists(year_files+'\\Data.xlsx'):
+        data_df = pd.read_excel(year_files+'\\Data.xlsx', 'VLE Use Per Student')
+        username_df = gradesExport['USERNAME']
+        new_column = pd.DataFrame(columns=['Student', 'Activity count'])
+        for index, row in username_df.items():
+            row_df = data_df.loc[data_df['Student'].str.contains(str(row))]
+            new_column = new_column.append(row_df,ignore_index=True)
+        new_column = new_column.drop('Student', axis=1)
+        normalised_column = new_column
+        new_column = new_column.rename(columns={"Activity count":"ACTIVITY COUNT"})
+        normalised_column = normalised_column.rename(columns={"Activity count":"NORMALISED ACTIVITY COUNT"})
+        normalised_column=(normalised_column-normalised_column.min())/(normalised_column.max()-normalised_column.min())
+        new_column = new_column.join(normalised_column)
+        gradesExport = gradesExport.join(new_column)
+
+    # Save Report
+    gradesExport = gradesExport.sample(frac=1).reset_index(drop=True)
+    gradesExport['USERNAME'] = gradesExport['USERNAME'].map(formatUsername)
+    gradesExport.to_csv('GradeReport{}.csv'.format(year_files), index=False)
